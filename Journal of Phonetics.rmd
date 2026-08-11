@@ -1,5 +1,5 @@
 ---
-title: "Journal of Phonetics"
+title: "Representing multidimensional speech rhythm: Comparing latent-dimensional and feature-based modelling of Persian rhythm"
 output: html_document
 date: '2026'
 ---
