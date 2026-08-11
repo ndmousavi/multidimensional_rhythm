@@ -1,0 +1,1546 @@
+---
+title: "Journal of Phonetics"
+output: html_document
+date: '2026'
+---
+```{r}
+## -------------------------------------------------
+## Load packages
+## -------------------------------------------------
+
+library(tidyverse)
+library(corrplot)
+library(Hmisc)
+
+## -------------------------------------------------
+## Load data
+## -------------------------------------------------
+
+df <- read.csv("/..../df_rhythm_persian.csv")
+
+glimpse(df)
+summary(df)
+```
+
+
+
+
+
+# Representing multidimensional rhythm
+
+```{r}
+cor_mat <- cor(
+  rhythm,
+  use = "pairwise.complete.obs",
+  method = "pearson"
+)
+
+round(cor_mat, 2)
+```
+
+
+
+```{r}
+library(corrplot)
+
+corrplot(
+  cor_mat,
+  method = "color",
+  type = "lower",
+  order = "hclust",
+  diag = FALSE,
+  tl.col = "black",
+  tl.cex = 0.65,
+  tl.srt = 45
+)
+
+pdf(
+  file = "/..../correlation_matrix_rhythm.pdf",
+  width = 10,
+  height = 8
+)
+
+corrplot(
+  cor_mat,
+  method = "color",
+  type = "lower",
+  order = "hclust",
+  diag = FALSE,
+  tl.col = "black",
+  tl.cex = 0.65,
+  tl.srt = 45
+)
+
+dev.off()
+```
+
+
+
+
+# Statistical modeling
+```{r}
+colnames(df)
+```
+# Fit the PCA
+```{r}
+rhythm <- df[, c("percent_V","deltaV","deltaC","nPVI_v","rPVI_c",
+                 "V.C_ratio","varco_c","cv_rate","v_rate","c_rate",
+                 "mean_c","mean_v","std_f0_peak","std_f0_mean",
+                 "nPVI_f0_mean","rPVI_f0_mean","nPVI_f0_peak",
+                 "rPVI_f0_peak","varcoM_f0","varcoP_f0",
+                 "std_int_peak","std_int_mean","nPVI_int_mean",
+                 "rPVI_int_mean","nPVI_int_peak","rPVI_int_peak",
+                 "varcoM_int","varcoP_int")]
+
+pca <- prcomp(rhythm, center = TRUE, scale. = TRUE)
+
+scores <- as.data.frame(pca$x)
+
+df_pca <- cbind(df, scores)
+```
+
+
+```{r}
+## 1. Basic information about the PCA
+pca
+
+cat("\nNumber of observations:", nrow(pca$x), "\n")
+cat("Number of variables:", ncol(pca$rotation), "\n")
+cat("Variables centered:", !isFALSE(pca$center), "\n")
+cat("Variables scaled:", !isFALSE(pca$scale), "\n")
+
+
+## 2. Variance explained by each component
+pca_summary <- summary(pca)
+print(pca_summary)
+
+
+## 3. Detailed variance table
+eigenvalues <- pca$sdev^2
+variance_proportion <- eigenvalues / sum(eigenvalues)
+cumulative_variance <- cumsum(variance_proportion)
+
+variance_table <- data.frame(
+  PC = paste0("PC", seq_along(eigenvalues)),
+  Eigenvalue = eigenvalues,
+  Variance_Percent = variance_proportion * 100,
+  Cumulative_Percent = cumulative_variance * 100
+)
+
+print(
+  variance_table,
+  row.names = FALSE,
+  digits = 4
+)
+
+
+## 4. Number of components under common retention criteria
+cat(
+  "\nComponents with eigenvalues > 1:",
+  sum(eigenvalues > 1),
+  "\n"
+)
+
+cat(
+  "Components required for at least 70% cumulative variance:",
+  which(cumulative_variance >= 0.70)[1],
+  "\n"
+)
+
+cat(
+  "Components required for at least 80% cumulative variance:",
+  which(cumulative_variance >= 0.80)[1],
+  "\n"
+)
+
+cat(
+  "Components required for at least 90% cumulative variance:",
+  which(cumulative_variance >= 0.90)[1],
+  "\n"
+)
+
+
+## 5. Loadings for the first three PCs
+loadings_PC1_PC3 <- pca$rotation[, 1:3]
+
+print(
+  round(loadings_PC1_PC3, 3)
+)
+
+
+## 6. Variables ordered by absolute loading for each retained PC
+for (pc in 1:3) {
+  
+  ordered_loadings <- sort(
+    pca$rotation[, pc],
+    decreasing = FALSE
+  )
+  
+  cat(
+    "\n\nLoadings for PC", pc,
+    " ordered from negative to positive:\n",
+    sep = ""
+  )
+  
+  print(round(ordered_loadings, 3))
+  
+  cat(
+    "\nLargest absolute loadings for PC", pc, ":\n",
+    sep = ""
+  )
+  
+  absolute_order <- order(
+    abs(pca$rotation[, pc]),
+    decreasing = TRUE
+  )
+  
+  print(
+    round(pca$rotation[absolute_order, pc], 3)
+  )
+}
+```
+
+
+
+
+
+```{r}
+summary(pca)
+
+print(variance_table, row.names = FALSE, digits = 4)
+
+round(pca$rotation[, 1:3], 3)
+```
+
+
+
+```{r}
+## Extract loadings for the first three PCs
+loadings <- pca$rotation[, 1:3]
+
+
+## Function for plotting component loadings
+plot_loadings <- function(pca_object, pc_number) {
+  
+  loading_values <- pca_object$rotation[, pc_number]
+  loading_values <- sort(loading_values)
+  
+  par(mar = c(5, 10, 4, 2))
+  
+  barplot(
+    loading_values,
+    horiz = TRUE,
+    las = 1,
+    names.arg = names(loading_values),
+    xlab = "Loading",
+    main = paste0("Variable loadings on PC", pc_number),
+    cex.names = 0.75
+  )
+  
+  abline(v = 0, lty = 2)
+}
+
+
+```
+
+
+##PCA_loadings
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tidytext)
+
+## Extract loadings
+loading_df <- as.data.frame(pca$rotation[, 1:3]) |>
+  tibble::rownames_to_column("Feature") |>
+  pivot_longer(
+    cols = c(PC1, PC2, PC3),
+    names_to = "PC",
+    values_to = "Loading"
+  ) |>
+  mutate(
+    Abs_loading = abs(Loading),
+    Feature_ordered = reorder_within(
+      Feature,
+      Abs_loading,
+      PC
+    )
+  )
+
+## Plot all 28 loadings, independently ordered within each PC
+ggplot(
+  loading_df,
+  aes(
+    x = Loading,
+    y = Feature_ordered
+  )
+) +
+  geom_col(width = 0.75) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.4
+  ) +
+  facet_wrap(
+    ~ PC,
+    scales = "free_y",
+    ncol = 3
+  ) +
+  scale_y_reordered() +
+  labs(
+    x = "PCA loading",
+    y = NULL,
+    title = "Loadings of rhythm measures on the retained principal components"
+  ) +
+  theme_classic() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    axis.text.y = element_text(size = 7),
+    plot.title = element_text(hjust = 0.5)
+  )
+```
+
+## PCA_loadings_top10.pdf
+
+```{r}
+for(i in 1:3){
+
+  cat("\n\n========== PC", i, "==========\n")
+
+  L <- pca$rotation[, i]
+
+  L <- sort(L)
+
+  print(round(L, 3))
+}
+```
+```{r}
+library(ggplot2)
+library(tidytext)
+library(scales)
+
+p_loading <- ggplot(top_loading_df, aes(x = Loading, y = Feature_ordered, fill = Loading > 0)) +
+  geom_col(width = 0.72, show.legend = FALSE) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.4
+  ) +
+  facet_wrap( ~ PC, scales = "free_y", ncol = 3) +
+  scale_y_reordered() +
+coord_cartesian(xlim = c(-0.4, 0.4)) +
+  labs(x = "Loading", y = NULL) +
+  theme_classic(base_size = 11) +
+  theme(
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(face = "bold"),
+    axis.text.y = element_text(size = 8),
+    axis.text.x = element_text(size = 9),
+    panel.spacing = unit(1.2, "lines")
+  )
+
+
+ggsave(
+  "..../PCA_loadings_top10.pdf",
+  p_loading,
+  width = 8.5,
+  height = 4.8,
+  units = "in"
+)
+
+```
+
+# PCA loadin and scree plot
+
+
+
+
+```{r}
+library(lme4)
+library(lmerTest)
+library(performance)
+
+# 1. Null model: random intercept for Speaker
+m0 <- lmer(
+  PC1 ~ 1 + (1 | Speaker),
+  data = df_pca,
+  REML = FALSE
+)
+
+# 2. Task model: fixed Task effect + random intercept
+m1 <- lmer(
+  PC1 ~ Task + (1 | Speaker),
+  data = df_pca,
+  REML = FALSE
+)
+
+# 3. Random-slope model:
+# the effect of Task is allowed to vary across speakers
+m2 <- lmer(
+  PC1 ~ Task + (1 + Task | Speaker),
+  data = df_pca,
+  REML = FALSE
+)
+
+# Model comparisons
+anova(m0, m1)  # Does Task improve the model?
+anova(m1, m2)  # Is speaker-specific task variation supported?
+
+AIC(m0, m1, m2)
+BIC(m0, m1, m2)
+
+# Check model stability
+isSingular(m2, tol = 1e-4)
+m2@optinfo$conv$lme4$messages
+```
+
+
+
+
+```{r}
+library(lme4)
+library(lmerTest)
+library(performance)
+
+m0 <- lmer(PC3 ~ 1 + (1 | Speaker),
+           data = df_pca,
+           REML = FALSE)
+
+m1 <- lmer(PC3 ~ Task + (1 | Speaker),
+           data = df_pca,
+           REML = FALSE)
+
+
+
+anova(m0, m1)
+
+AIC(m0, m1)
+
+BIC(m0, m1)
+
+
+```
+
+
+```{r}
+m_PC1 <- lmer(PC1 ~ Task + (1 | Speaker), data = df_pca)
+m_PC2 <- lmer(PC2 ~ Task + (1 | Speaker), data = df_pca)
+m_PC3 <- lmer(PC3 ~ Task + (1 | Speaker), data = df_pca)
+```
+
+```{r}
+anova(m_PC1)
+anova(m_PC2)
+anova(m_PC3)
+
+
+```
+
+
+```{r}
+library(performance)
+
+r2(m_PC1)
+r2(m_PC2)
+r2(m_PC3)
+
+
+```
+
+
+```{r}
+library(lme4)
+library(lmerTest)
+library(emmeans)
+
+# PC1
+m1_PC1 <- lmer(
+  PC1 ~ Task + (1 | Speaker),
+  data = df_pca,
+  REML = FALSE
+)
+
+emm_PC1 <- emmeans(m1_PC1, ~ Task)
+
+pairs_PC1 <- pairs(emm_PC1, adjust = "tukey")
+summary(pairs_PC1)
+
+
+# PC2
+m1_PC2 <- lmer(
+  PC2 ~ Task + (1 | Speaker),
+  data = df_pca,
+  REML = FALSE
+)
+
+emm_PC2 <- emmeans(m1_PC2, ~ Task)
+
+pairs_PC2 <- pairs(emm_PC2, adjust = "tukey")
+summary(pairs_PC2)
+
+# PC3
+m1_PC3 <- lmer(
+  PC3 ~ Task + (1 | Speaker),
+  data = df_pca,
+  REML = FALSE
+)
+
+emm_PC3 <- emmeans(m1_PC3, ~ Task)
+
+pairs_PC3 <- pairs(emm_PC3, adjust = "tukey")
+summary(pairs_PC3)
+
+```
+
+
+```{r}
+summary(pairs_PC1)
+summary(pairs_PC2)
+summary(pairs_PC3)
+```
+
+
+```{r}
+VarCorr(m1_PC1)
+VarCorr(m1_PC2)
+VarCorr(m1_PC3)
+```
+
+
+
+```{r}
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(performance)
+
+# ------------------------------------------------------------
+# Output folders for PCA models
+# ------------------------------------------------------------
+
+pca_output_dir <- paste0(
+  "/..../PCA_based"
+)
+
+pca_models_dir <- file.path(pca_output_dir, "models")
+pca_tables_dir <- file.path(pca_output_dir, "tables")
+pca_posthoc_dir <- file.path(pca_output_dir, "posthoc")
+pca_diagnostics_dir <- file.path(pca_output_dir, "diagnostics")
+
+pca_dirs <- c(
+  pca_output_dir,
+  pca_models_dir,
+  pca_tables_dir,
+  pca_posthoc_dir,
+  pca_diagnostics_dir
+)
+
+invisible(
+  lapply(
+    pca_dirs,
+    dir.create,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+)
+
+# ------------------------------------------------------------
+# Prepare variables
+# ------------------------------------------------------------
+
+df_pca$Task <- factor(
+  df_pca$Task,
+  levels = c(
+    "r(f)",
+    "r(i)",
+    "con",
+    "pic",
+    "str",
+    "m(f)",
+    "m(i)"
+  )
+)
+
+df_pca$Speaker <- factor(df_pca$Speaker)
+
+pcs <- c("PC1", "PC2", "PC3")
+
+stopifnot(
+  all(pcs %in% names(df_pca)),
+  !anyNA(df_pca$Task),
+  nlevels(df_pca$Task) == 7
+)
+
+# ------------------------------------------------------------
+# Function for one principal component
+# ------------------------------------------------------------
+
+fit_pc <- function(pc) {
+
+  analysis_data <- df_pca[
+    complete.cases(df_pca[, c(pc, "Task", "Speaker")]),
+    c(pc, "Task", "Speaker")
+  ]
+
+  analysis_data$Task <- droplevels(analysis_data$Task)
+  analysis_data$Speaker <- droplevels(analysis_data$Speaker)
+
+  null_formula <- as.formula(
+    paste(pc, "~ 1 + (1 | Speaker)")
+  )
+
+  task_formula <- as.formula(
+    paste(pc, "~ Task + (1 | Speaker)")
+  )
+
+  # ML models for model comparison
+  m0_ml <- lmer(
+    null_formula,
+    data = analysis_data,
+    REML = FALSE
+  )
+
+  m1_ml <- lmer(
+    task_formula,
+    data = analysis_data,
+    REML = FALSE
+  )
+
+  model_comparison <- anova(m0_ml, m1_ml)
+
+  # Final REML model for inference, EMMs, R2, and diagnostics
+  final_model <- update(
+    m1_ml,
+    REML = TRUE
+  )
+
+  # Type III test with Satterthwaite denominator df
+  omnibus <- anova(
+    final_model,
+    type = 3,
+    ddf = "Satterthwaite"
+  )
+
+  # R-squared
+  r2 <- performance::r2_nakagawa(final_model)
+
+  # Variance components
+  vc <- as.data.frame(VarCorr(final_model))
+
+  speaker_variance <- vc$vcov[
+    vc$grp == "Speaker" &
+      vc$var1 == "(Intercept)"
+  ]
+
+  residual_variance <- vc$vcov[
+    vc$grp == "Residual"
+  ]
+
+  icc_value <- speaker_variance /
+    (speaker_variance + residual_variance)
+
+  # Extract model results
+  result <- data.frame(
+    PC = pc,
+    N = nobs(final_model),
+    AIC_null = AIC(m0_ml),
+    AIC_Task = AIC(m1_ml),
+    BIC_null = BIC(m0_ml),
+    BIC_Task = BIC(m1_ml),
+    LRT_chisq = model_comparison[2, "Chisq"],
+    LRT_df = model_comparison[2, "Df"],
+    LRT_p = model_comparison[2, "Pr(>Chisq)"],
+    F = omnibus["Task", "F value"],
+    df1 = omnibus["Task", "NumDF"],
+    df2 = omnibus["Task", "DenDF"],
+    p = omnibus["Task", "Pr(>F)"],
+    Marginal_R2 = unname(r2$R2_marginal),
+    Conditional_R2 = unname(r2$R2_conditional),
+    Speaker_variance = speaker_variance,
+    Residual_variance = residual_variance,
+    ICC = icc_value,
+    Singular = isSingular(
+      final_model,
+      tol = 1e-4
+    ),
+    Convergence_warning = !is.null(
+      final_model@optinfo$conv$lme4$messages
+    ),
+    row.names = NULL
+  )
+
+  result$partial_eta_squared <- with(
+    result,
+    (F * df1) / ((F * df1) + df2)
+  )
+
+  # ----------------------------------------------------------
+  # Estimated marginal means and Tukey comparisons
+  # ----------------------------------------------------------
+
+  emm <- emmeans(
+    final_model,
+    ~ Task,
+    lmer.df = "satterthwaite"
+  )
+
+  emm_table <- as.data.frame(
+    summary(
+      emm,
+      infer = c(TRUE, TRUE)
+    )
+  )
+
+  pairwise_table <- as.data.frame(
+    summary(
+      pairs(
+        emm,
+        adjust = "tukey"
+      ),
+      infer = c(TRUE, TRUE)
+    )
+  )
+
+  emm_table$PC <- pc
+  pairwise_table$PC <- pc
+
+  # ----------------------------------------------------------
+  # Save model objects
+  # ----------------------------------------------------------
+
+  saveRDS(
+    m0_ml,
+    file.path(
+      pca_models_dir,
+      paste0(pc, "_null_ML.rds")
+    )
+  )
+
+  saveRDS(
+    m1_ml,
+    file.path(
+      pca_models_dir,
+      paste0(pc, "_Task_ML.rds")
+    )
+  )
+
+  saveRDS(
+    final_model,
+    file.path(
+      pca_models_dir,
+      paste0(pc, "_final_REML.rds")
+    )
+  )
+
+  # ----------------------------------------------------------
+  # Diagnostic plots
+  # ----------------------------------------------------------
+
+  pdf(
+    file.path(
+      pca_diagnostics_dir,
+      paste0(pc, "_diagnostics.pdf")
+    ),
+    width = 8,
+    height = 8
+  )
+
+  par(mfrow = c(2, 2))
+
+  # Residuals versus fitted values
+  plot(
+    fitted(final_model),
+    residuals(final_model),
+    xlab = "Fitted values",
+    ylab = "Residuals",
+    main = paste(pc, "Residuals vs fitted")
+  )
+
+  abline(h = 0, lty = 2)
+
+  # Residual Q-Q plot
+  qqnorm(
+    residuals(final_model),
+    main = paste(pc, "Residual Q-Q")
+  )
+
+  qqline(residuals(final_model))
+
+  # Residual histogram
+  hist(
+    residuals(final_model),
+    breaks = "FD",
+    main = paste(pc, "Residuals"),
+    xlab = "Residuals"
+  )
+
+  # Speaker random-effects Q-Q plot
+  speaker_effects <- ranef(
+    final_model
+  )$Speaker[, 1]
+
+  qqnorm(
+    speaker_effects,
+    main = paste(pc, "Speaker effects")
+  )
+
+  qqline(speaker_effects)
+
+  dev.off()
+
+  list(
+    result = result,
+    final_model = final_model,
+    emm = emm_table,
+    pairwise = pairwise_table
+  )
+}
+
+# ------------------------------------------------------------
+# Run all PCA models
+# ------------------------------------------------------------
+
+pca_models <- setNames(
+  lapply(
+    pcs,
+    fit_pc
+  ),
+  pcs
+)
+
+# ------------------------------------------------------------
+# Combine and save PCA model results
+# ------------------------------------------------------------
+
+pca_results <- do.call(
+  rbind,
+  lapply(
+    pca_models,
+    function(x) x$result
+  )
+)
+
+write.csv(
+  pca_results,
+  file.path(
+    pca_tables_dir,
+    "PCA_model_results.csv"
+  ),
+  row.names = FALSE
+)
+
+# ------------------------------------------------------------
+# Combine and save EMMs
+# ------------------------------------------------------------
+
+all_pca_emmeans <- do.call(
+  rbind,
+  lapply(
+    pca_models,
+    function(x) x$emm
+  )
+)
+
+all_pca_pairwise <- do.call(
+  rbind,
+  lapply(
+    pca_models,
+    function(x) x$pairwise
+  )
+)
+
+write.csv(
+  all_pca_emmeans,
+  file.path(
+    pca_tables_dir,
+    "PCA_estimated_marginal_means.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  all_pca_pairwise,
+  file.path(
+    pca_tables_dir,
+    "PCA_Tukey_pairwise_comparisons.csv"
+  ),
+  row.names = FALSE
+)
+
+saveRDS(
+  pca_models,
+  file.path(
+    pca_output_dir,
+    "all_PCA_models.rds"
+  )
+)
+
+writeLines(
+  capture.output(sessionInfo()),
+  file.path(
+    pca_output_dir,
+    "sessionInfo.txt"
+  )
+)
+
+print(pca_results)
+```
+
+
+```{r}
+pc1_re <- ranef(m1_PC1, condVar = TRUE)$Speaker
+pc1_re$Speaker <- rownames(pc1_re)
+
+pc1_re[order(abs(pc1_re[, "(Intercept)"]), decreasing = TRUE), ]
+```
+
+
+
+
+
+
+
+
+
+# Feature-based modeling
+```{r}
+df <- read.csv(
+  "/..../df_rhythm_persian.csv",
+  stringsAsFactors = FALSE
+)
+
+dim(df)
+names(df)
+str(df)
+```
+
+
+
+```{r}
+# Rhythm measures only
+rhythm <- df[, 9:36]
+
+# Standardize (recommended because variables are on different scales)
+rhythm_z <- scale(rhythm)
+
+# Correlation matrix
+cor_mat <- cor(rhythm_z, use = "pairwise.complete.obs")
+
+# Visualize
+library(corrplot)
+
+corrplot(
+  cor_mat,
+  method = "color",
+  type = "upper",
+  tl.cex = 0.7,
+  tl.col = "black"
+)
+
+```
+
+
+
+```{r}
+
+
+
+library(caret)
+
+high_cor <- findCorrelation(
+    cor_mat,
+    cutoff = .80,
+    names = TRUE,
+    exact = TRUE
+)
+
+high_cor
+```
+
+
+
+```{r}
+# ============================================================
+# Feature selection
+# ============================================================
+
+library(caret)
+
+# Explicitly define all 28 rhythm measures
+rhythm_features <- names(df)[9:36]
+
+# Confirm that the intended 28 columns were selected
+stopifnot(length(rhythm_features) == 28)
+
+# Confirm that all rhythm measures are numeric
+non_numeric <- rhythm_features[
+  !vapply(df[rhythm_features], is.numeric, logical(1))
+]
+
+if (length(non_numeric) > 0) {
+  stop(
+    "These rhythm measures are not numeric: ",
+    paste(non_numeric, collapse = ", ")
+  )
+}
+
+# Pearson correlation matrix
+cor_mat <- cor(
+  df[rhythm_features],
+  use = "pairwise.complete.obs",
+  method = "pearson"
+)
+
+# Variables identified as redundant
+removed_features <- caret::findCorrelation(
+  cor_mat,
+  cutoff = 0.80,
+  names = TRUE,
+  exact = TRUE
+)
+
+# Variables retained for modelling
+features <- setdiff(rhythm_features, removed_features)
+
+removed_features
+features
+length(removed_features)
+length(features)
+```
+
+
+
+
+```{r}
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(performance)
+
+# ------------------------------------------------------------
+# One feature: percent_V
+# ------------------------------------------------------------
+
+analysis_data <- df[
+  complete.cases(df[, c("percent_V", "Task", "Speaker")]),
+  c("percent_V", "Task", "Speaker")
+]
+
+analysis_data$Task <- droplevels(factor(analysis_data$Task))
+analysis_data$Speaker <- droplevels(factor(analysis_data$Speaker))
+
+# 1. Fit models with ML
+m0_percent_V <- lmer(
+  percent_V ~ 1 + (1 | Speaker),
+  data = analysis_data,
+  REML = FALSE
+)
+
+m1_percent_V <- lmer(
+  percent_V ~ Task + (1 | Speaker),
+  data = analysis_data,
+  REML = FALSE
+)
+
+# 2. Likelihood-ratio test, AIC, and BIC
+anova(m0_percent_V, m1_percent_V)
+AIC(m0_percent_V, m1_percent_V)
+BIC(m0_percent_V, m1_percent_V)
+
+# 3. Refit final model with REML
+final_percent_V <- update(
+  m1_percent_V,
+  REML = TRUE
+)
+
+# 4. Type III Satterthwaite F test
+anova_percent_V <- anova(
+  final_percent_V,
+  type = 3,
+  ddf = "Satterthwaite"
+)
+
+print(anova_percent_V)
+
+# 5. Marginal and conditional R-squared
+performance::r2_nakagawa(final_percent_V)
+
+# 6. Estimated marginal means
+emm_percent_V <- emmeans(
+  final_percent_V,
+  ~ Task,
+  lmer.df = "satterthwaite"
+)
+
+print(emm_percent_V)
+
+# 7. Tukey-adjusted pairwise comparisons
+pairs_percent_V <- pairs(
+  emm_percent_V,
+  adjust = "tukey"
+)
+
+print(pairs_percent_V)
+
+# 8. Basic model checks
+summary(final_percent_V)
+isSingular(final_percent_V, tol = 1e-4)
+final_percent_V@optinfo$conv$lme4$messages
+```
+
+
+
+######## for all features #########
+
+```{r}
+
+
+
+
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(performance)
+
+# ------------------------------------------------------------
+# Retained features
+# ------------------------------------------------------------
+
+features <- c(
+  "percent_V",
+  "deltaV",
+  "nPVI_v",
+  "rPVI_c",
+  "V.C_ratio",
+  "varco_c",
+  "cv_rate",
+  "v_rate",
+  "mean_c",
+  "std_f0_peak",
+  "nPVI_f0_mean",
+  "std_int_peak",
+  "nPVI_int_mean",
+  "rPVI_int_mean"
+)
+
+# ------------------------------------------------------------
+# Output folders
+# ------------------------------------------------------------
+
+output_dir <- "/...../feature_based"
+
+tables_dir <- file.path(output_dir, "tables")
+models_dir <- file.path(output_dir, "models")
+posthoc_dir <- file.path(output_dir, "posthoc")
+diagnostics_dir <- file.path(output_dir, "diagnostics")
+
+dirs <- c(
+  output_dir,
+  tables_dir,
+  models_dir,
+  posthoc_dir,
+  diagnostics_dir
+)
+
+invisible(
+  lapply(
+    dirs,
+    dir.create,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+)
+
+# ------------------------------------------------------------
+# Prepare variables
+# ------------------------------------------------------------
+
+df$Task <- factor(
+  df$Task,
+  levels = c(
+    "r(f)",
+    "r(i)",
+    "con",
+    "pic",
+    "str",
+    "m(f)",
+    "m(i)"
+  )
+)
+
+df$Speaker <- factor(df$Speaker)
+
+stopifnot(
+  all(features %in% names(df)),
+  !anyNA(df$Task),
+  nlevels(df$Task) == 7
+)
+
+# ------------------------------------------------------------
+# Function for one feature
+# ------------------------------------------------------------
+
+fit_feature <- function(feature) {
+
+  analysis_data <- df[
+    complete.cases(df[, c(feature, "Task", "Speaker")]),
+    c(feature, "Task", "Speaker")
+  ]
+
+  analysis_data$Task <- droplevels(analysis_data$Task)
+  analysis_data$Speaker <- droplevels(analysis_data$Speaker)
+
+  null_formula <- as.formula(
+    paste(feature, "~ 1 + (1 | Speaker)")
+  )
+
+  task_formula <- as.formula(
+    paste(feature, "~ Task + (1 | Speaker)")
+  )
+
+  # ML models for model comparison
+  m0_ml <- lmer(
+    null_formula,
+    data = analysis_data,
+    REML = FALSE
+  )
+
+  m1_ml <- lmer(
+    task_formula,
+    data = analysis_data,
+    REML = FALSE
+  )
+
+  model_comparison <- anova(
+    m0_ml,
+    m1_ml
+  )
+
+  # Final REML model
+  final_model <- update(
+    m1_ml,
+    REML = TRUE
+  )
+
+  # Type III Satterthwaite test
+  omnibus <- anova(
+    final_model,
+    type = 3,
+    ddf = "Satterthwaite"
+  )
+
+  # R-squared
+  r2 <- performance::r2_nakagawa(
+    final_model
+  )
+
+  # Extract results
+  result <- data.frame(
+    Feature = feature,
+    N = nobs(final_model),
+    AIC_null = AIC(m0_ml),
+    AIC_Task = AIC(m1_ml),
+    BIC_null = BIC(m0_ml),
+    BIC_Task = BIC(m1_ml),
+    LRT_chisq = model_comparison[2, "Chisq"],
+    LRT_df = model_comparison[2, "Df"],
+    LRT_p = model_comparison[2, "Pr(>Chisq)"],
+    F = omnibus["Task", "F value"],
+    df1 = omnibus["Task", "NumDF"],
+    df2 = omnibus["Task", "DenDF"],
+    p = omnibus["Task", "Pr(>F)"],
+    Marginal_R2 = unname(r2$R2_marginal),
+    Conditional_R2 = unname(r2$R2_conditional),
+    Singular = isSingular(
+      final_model,
+      tol = 1e-4
+    ),
+    Convergence_warning = !is.null(
+      final_model@optinfo$conv$lme4$messages
+    ),
+    row.names = NULL
+  )
+
+  result$partial_eta_squared <- with(
+    result,
+    (F * df1) / ((F * df1) + df2)
+  )
+
+  # Save model objects
+  saveRDS(
+    m0_ml,
+    file.path(
+      models_dir,
+      paste0(feature, "_null_ML.rds")
+    )
+  )
+
+  saveRDS(
+    m1_ml,
+    file.path(
+      models_dir,
+      paste0(feature, "_Task_ML.rds")
+    )
+  )
+
+  saveRDS(
+    final_model,
+    file.path(
+      models_dir,
+      paste0(feature, "_final_REML.rds")
+    )
+  )
+
+  # Diagnostic plots
+  pdf(
+    file.path(
+      diagnostics_dir,
+      paste0(feature, "_diagnostics.pdf")
+    ),
+    width = 8,
+    height = 8
+  )
+
+  par(mfrow = c(2, 2))
+
+  plot(
+    fitted(final_model),
+    residuals(final_model),
+    xlab = "Fitted values",
+    ylab = "Residuals",
+    main = paste(feature, "Residuals vs fitted")
+  )
+
+  abline(h = 0, lty = 2)
+
+  qqnorm(
+    residuals(final_model),
+    main = paste(feature, "Residual Q-Q")
+  )
+
+  qqline(residuals(final_model))
+
+  hist(
+    residuals(final_model),
+    breaks = "FD",
+    main = paste(feature, "Residuals"),
+    xlab = "Residuals"
+  )
+
+  speaker_effects <- ranef(
+    final_model
+  )$Speaker[, 1]
+
+  qqnorm(
+    speaker_effects,
+    main = paste(feature, "Speaker effects")
+  )
+
+  qqline(speaker_effects)
+
+  dev.off()
+
+  list(
+    result = result,
+    final_model = final_model
+  )
+}
+
+# ------------------------------------------------------------
+# Run all feature models
+# ------------------------------------------------------------
+
+feature_models <- setNames(
+  lapply(
+    features,
+    fit_feature
+  ),
+  features
+)
+
+# ------------------------------------------------------------
+# Combine omnibus results
+# ------------------------------------------------------------
+
+results <- do.call(
+  rbind,
+  lapply(
+    feature_models,
+    function(x) x$result
+  )
+)
+
+# Benjamini-Hochberg correction
+results$FDR_p <- p.adjust(
+  results$p,
+  method = "BH"
+)
+
+results$Significant_FDR <- (
+  results$FDR_p < 0.05
+)
+
+write.csv(
+  results,
+  file.path(
+    tables_dir,
+    "feature_model_results.csv"
+  ),
+  row.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# EMMs and Tukey comparisons for FDR-significant features
+# ------------------------------------------------------------
+
+significant_features <- results$Feature[
+  results$Significant_FDR
+]
+
+emm_tables <- list()
+pairwise_tables <- list()
+
+for (feature in significant_features) {
+
+  final_model <- feature_models[[feature]]$final_model
+
+  emm <- emmeans(
+    final_model,
+    ~ Task,
+    lmer.df = "satterthwaite"
+  )
+
+  emm_table <- as.data.frame(
+    summary(
+      emm,
+      infer = c(TRUE, TRUE)
+    )
+  )
+
+  pairwise_table <- as.data.frame(
+    summary(
+      pairs(
+        emm,
+        adjust = "tukey"
+      ),
+      infer = c(TRUE, TRUE)
+    )
+  )
+
+  emm_table$Feature <- feature
+  pairwise_table$Feature <- feature
+
+  emm_tables[[feature]] <- emm_table
+  pairwise_tables[[feature]] <- pairwise_table
+
+  write.csv(
+    emm_table,
+    file.path(
+      posthoc_dir,
+      paste0(feature, "_EMMs.csv")
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    pairwise_table,
+    file.path(
+      posthoc_dir,
+      paste0(feature, "_Tukey.csv")
+    ),
+    row.names = FALSE
+  )
+}
+
+all_emmeans <- do.call(
+  rbind,
+  emm_tables
+)
+
+all_pairwise <- do.call(
+  rbind,
+  pairwise_tables
+)
+
+write.csv(
+  all_emmeans,
+  file.path(
+    tables_dir,
+    "all_estimated_marginal_means.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  all_pairwise,
+  file.path(
+    tables_dir,
+    "all_Tukey_pairwise_comparisons.csv"
+  ),
+  row.names = FALSE
+)
+
+writeLines(
+  significant_features,
+  file.path(
+    output_dir,
+    "FDR_significant_features.txt"
+  )
+)
+
+saveRDS(
+  feature_models,
+  file.path(
+    output_dir,
+    "all_feature_models.rds"
+  )
+)
+
+writeLines(
+  capture.output(sessionInfo()),
+  file.path(
+    output_dir,
+    "sessionInfo.txt"
+  )
+)
+
+print(results)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
